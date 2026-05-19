@@ -5,9 +5,11 @@
 """
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.models.email import EmailAnalysis, EmailRecord
 from app.schemas.dashboard import DashboardSummary
 from app.services.auth_service import AuthService
 
@@ -16,7 +18,45 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 @router.get("/summary", response_model=DashboardSummary)
 def dashboard_summary(db: Session = Depends(get_db)) -> DashboardSummary:
-    """第一阶段 Dashboard 占位统计；后续邮件分析阶段会填充真实指标。"""
+    """Dashboard 汇总统计。"""
 
-    # 当前只返回 Google 是否连接，其他数字保持 0，避免前端展示假数据。
-    return DashboardSummary(google_connected=AuthService(db).get_current_user() is not None)
+    user = AuthService(db).get_current_user()
+    if user is None:
+        return DashboardSummary(google_connected=False)
+
+    email_count = db.scalar(select(func.count()).where(EmailRecord.user_id == user.id)) or 0
+    high_priority_count = (
+        db.scalar(
+            select(func.count())
+            .select_from(EmailAnalysis)
+            .join(EmailRecord, EmailRecord.id == EmailAnalysis.email_id)
+            .where(EmailRecord.user_id == user.id, EmailAnalysis.priority == "high")
+        )
+        or 0
+    )
+    need_reply_count = (
+        db.scalar(
+            select(func.count())
+            .select_from(EmailAnalysis)
+            .join(EmailRecord, EmailRecord.id == EmailAnalysis.email_id)
+            .where(EmailRecord.user_id == user.id, EmailAnalysis.need_reply.is_(True))
+        )
+        or 0
+    )
+    meeting_request_count = (
+        db.scalar(
+            select(func.count())
+            .select_from(EmailAnalysis)
+            .join(EmailRecord, EmailRecord.id == EmailAnalysis.email_id)
+            .where(EmailRecord.user_id == user.id, EmailAnalysis.has_meeting_request.is_(True))
+        )
+        or 0
+    )
+
+    return DashboardSummary(
+        google_connected=True,
+        email_count_today=email_count,
+        high_priority_count=high_priority_count,
+        need_reply_count=need_reply_count,
+        meeting_request_count=meeting_request_count,
+    )

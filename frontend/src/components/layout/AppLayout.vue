@@ -26,6 +26,8 @@ const connected = ref(false)
 // 根据当前路由名生成页面标题。
 const routeTitle = computed(() => {
   if (route.name === 'inbox') return 'Gmail Inbox'
+  if (route.name === 'email-detail') return 'Email Detail'
+  if (route.name === 'traces') return 'Agent Trace'
   if (route.name === 'settings') return 'Settings'
   return 'Dashboard'
 })

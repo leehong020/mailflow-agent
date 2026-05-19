@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./mailflow_agent.db"
     redis_url: str = "redis://localhost:6379/0"
 
+    # 大模型配置。DashScope 兼容 OpenAI Chat Completions 协议，
+    # 因此这里使用 openai Python SDK 调用。
+    llm_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    llm_api_key: str | None = None
+    llm_model: str = "qwen-plus"
+    llm_timeout_seconds: float = 30.0
+
     # Google OAuth Client JSON 的默认位置。
     # 从 backend 目录启动时，../secrets 会指向项目根目录的 secrets。
     google_oauth_client_file: str = "../secrets/google_oauth_client.json"
@@ -46,7 +53,10 @@ class Settings(BaseSettings):
         "openid,"
         "https://www.googleapis.com/auth/userinfo.email,"
         "https://www.googleapis.com/auth/userinfo.profile,"
-        "https://www.googleapis.com/auth/gmail.readonly"
+        "https://www.googleapis.com/auth/gmail.readonly,"
+        "https://www.googleapis.com/auth/gmail.compose,"
+        "https://www.googleapis.com/auth/calendar.readonly,"
+        "https://www.googleapis.com/auth/calendar.events"
     )
     allow_insecure_oauth_local: bool = True
 

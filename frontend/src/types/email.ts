@@ -8,10 +8,48 @@ export interface EmailListItem {
   received_at?: string | null
   snippet: string
   body_preview?: string | null
+  analysis?: EmailAnalysisInfo | null
 }
 
 // 邮件列表响应，保留 total 便于后续分页。
 export interface EmailListResponse {
   items: EmailListItem[]
   total: number
+}
+
+export interface EmailAnalysisInfo {
+  summary: string
+  key_points: string[]
+  category: string
+  priority: string
+  need_reply: boolean
+  has_task: boolean
+  has_meeting_request: boolean
+  reason: string
+  recommended_actions: string[]
+}
+
+export interface TaskInfo {
+  id: string
+  title: string
+  description: string
+  deadline?: string | null
+  priority: string
+  status: string
+}
+
+export interface EmailDetail extends EmailListItem {
+  body_text: string
+  tasks: TaskInfo[]
+}
+
+export interface AnalyzeEmailsResponse {
+  status: string
+  analyzed_count: number
+  message: string
+}
+
+export interface ReanalyzeEmailResponse {
+  status: string
+  message: string
 }

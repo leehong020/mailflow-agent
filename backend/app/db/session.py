@@ -28,6 +28,10 @@ SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 def init_db() -> None:
     """阶段一先自动建表；后续进入生产形态时再接入 Alembic 迁移。"""
 
+    from app.models.calendar import CalendarSuggestion  # noqa: F401
+    from app.models.draft import DraftPreview, PendingAction  # noqa: F401
+    from app.models.email import EmailAnalysis, EmailRecord, TaskItem  # noqa: F401
+    from app.models.trace import AgentTrace, AgentTraceEvent  # noqa: F401
     from app.models.user import User  # noqa: F401
 
     Base.metadata.create_all(bind=engine)

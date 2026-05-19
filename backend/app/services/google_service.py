@@ -10,6 +10,7 @@
 import json
 
 from google.oauth2.credentials import Credentials
+from google.auth.exceptions import GoogleAuthError, TransportError
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from sqlalchemy.orm import Session
@@ -17,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.core.security import encrypt_text
 from app.models.user import User
 from app.services.auth_service import AuthService
+from app.tools.google_calendar_tool import GoogleCalendarTool
 from app.tools.gmail_tool import GmailTool
 
 
@@ -41,7 +43,10 @@ class GoogleService:
 
         # access_token 有有效期；如果过期且存在 refresh_token，就自动刷新。
         if credentials.expired and credentials.refresh_token:
-            credentials.refresh(Request())
+            try:
+                credentials.refresh(Request())
+            except (GoogleAuthError, TransportError) as exc:
+                raise RuntimeError("刷新 Google token 失败，请重新连接 Google 账号。") from exc
             user.encrypted_google_token = encrypt_text(credentials.to_json())
             self.db.commit()
         return credentials
@@ -53,4 +58,70 @@ class GoogleService:
         if user is None:
             raise PermissionError("尚未连接 Google 账号。")
         credentials = self.credentials_for_user(user)
-        return GmailTool(credentials).list_recent_messages(limit=limit)
+        try:
+            return GmailTool(credentials).list_recent_messages(limit=limit)
+        except Exception as exc:
+            raise RuntimeError("读取 Gmail 邮件失败，请确认 Gmail API 已启用且账号已授予读取权限。") from exc
+
+    def create_gmail_draft(self, *, to: str, subject: str, body: str) -> dict:
+        """创建 Gmail 草稿。
+
+        第五阶段只创建草稿，不发送邮件。
+        """
+
+        user = self.auth_service.get_current_user()
+        if user is None:
+            raise PermissionError("尚未连接 Google 账号。")
+        credentials = self.credentials_for_user(user)
+        try:
+            return GmailTool(credentials).create_draft(to=to, subject=subject, body=body)
+        except Exception as exc:
+            raise RuntimeError("创建 Gmail 草稿失败，请确认已授予 gmail.compose 权限。") from exc
+
+    def list_calendar_events(self, *, user: User, time_min, time_max) -> list[dict]:
+        """读取 Google Calendar 指定范围内的日程。"""
+
+        credentials = self.credentials_for_user(user)
+        try:
+            return GoogleCalendarTool(credentials).list_events(time_min=time_min, time_max=time_max)
+        except Exception as exc:
+            raise RuntimeError("读取 Google Calendar 失败，请确认 Calendar API 已启用且账号已授予日历读取权限。") from exc
+
+    def query_calendar_busy(self, *, user: User, time_min, time_max) -> list[dict]:
+        """查询 Google Calendar 中已占用的时间段。"""
+
+        credentials = self.credentials_for_user(user)
+        try:
+            return GoogleCalendarTool(credentials).query_busy(time_min=time_min, time_max=time_max)
+        except Exception as exc:
+            raise RuntimeError("查询 Google Calendar 空闲时间失败，请确认已授予日历权限。") from exc
+
+    def create_calendar_event(
+        self,
+        *,
+        summary: str,
+        start: str,
+        end: str,
+        attendees: list[str],
+        description: str = "",
+        location: str = "",
+        timezone: str = "Asia/Shanghai",
+    ) -> dict:
+        """创建 Google Calendar 事件。"""
+
+        user = self.auth_service.get_current_user()
+        if user is None:
+            raise PermissionError("尚未连接 Google 账号。")
+        credentials = self.credentials_for_user(user)
+        try:
+            return GoogleCalendarTool(credentials).create_event(
+                summary=summary,
+                start=start,
+                end=end,
+                attendees=attendees,
+                description=description,
+                location=location,
+                timezone=timezone,
+            )
+        except Exception as exc:
+            raise RuntimeError("创建 Google Calendar 日程失败，请确认已授予 calendar.events 权限。") from exc

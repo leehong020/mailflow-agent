@@ -16,6 +16,14 @@
       </div>
     </div>
 
+    <el-alert
+      v-if="error"
+      :title="error"
+      type="warning"
+      show-icon
+      :closable="false"
+    />
+
     <div class="content-band">
       <h3>当前阶段</h3>
       <p>
@@ -35,6 +43,7 @@ import type { DashboardSummary } from '@/types/dashboard'
 
 const router = useRouter()
 const summary = ref<DashboardSummary | null>(null)
+const error = ref('')
 
 // 把后端统计结果转换成卡片数组，模板可以直接循环渲染。
 const stats = computed(() => [
@@ -46,7 +55,11 @@ const stats = computed(() => [
 
 onMounted(async () => {
   // 页面加载时读取一次 Dashboard 汇总数据。
-  const { data } = await getDashboardSummary()
-  summary.value = data
+  try {
+    const { data } = await getDashboardSummary()
+    summary.value = data
+  } catch (caught: any) {
+    error.value = caught?.response?.data?.detail ?? '读取 Dashboard 数据失败。'
+  }
 })
 </script>

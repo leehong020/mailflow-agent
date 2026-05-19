@@ -7,10 +7,14 @@ Service 层承接业务规则：
 - 断开连接时如何清理本地数据。
 """
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.security import decrypt_text, encrypt_text
+from app.models.calendar import CalendarSuggestion
+from app.models.draft import DraftPreview, PendingAction
+from app.models.email import EmailAnalysis, EmailRecord, TaskItem
+from app.models.trace import AgentTrace, AgentTraceEvent
 from app.models.user import User
 
 
@@ -64,5 +68,29 @@ class AuthService:
         user = self.get_current_user()
         if user is None:
             return
+        self._delete_user_workspace(user.id)
         self.db.delete(user)
         self.db.commit()
+
+    def _delete_user_workspace(self, user_id: str) -> None:
+        """删除演示账号下的本地工作区数据。
+
+        断开 Google 账号代表当前本地授权失效。清掉关联邮件、分析、草稿、
+        日程建议和轨迹，可以避免重新授权后旧 EmailRecord ID 继续混入前端，
+        造成“数据库有分析但页面显示未分析”的错觉。
+        """
+
+        email_ids = self.db.scalars(select(EmailRecord.id).where(EmailRecord.user_id == user_id)).all()
+        trace_ids = self.db.scalars(select(AgentTrace.id).where(AgentTrace.user_id == user_id)).all()
+
+        if email_ids:
+            self.db.execute(delete(TaskItem).where(TaskItem.source_email_id.in_(email_ids)))
+            self.db.execute(delete(EmailAnalysis).where(EmailAnalysis.email_id.in_(email_ids)))
+        if trace_ids:
+            self.db.execute(delete(AgentTraceEvent).where(AgentTraceEvent.trace_id.in_(trace_ids)))
+
+        self.db.execute(delete(PendingAction).where(PendingAction.user_id == user_id))
+        self.db.execute(delete(DraftPreview).where(DraftPreview.user_id == user_id))
+        self.db.execute(delete(CalendarSuggestion).where(CalendarSuggestion.user_id == user_id))
+        self.db.execute(delete(AgentTrace).where(AgentTrace.user_id == user_id))
+        self.db.execute(delete(EmailRecord).where(EmailRecord.user_id == user_id))

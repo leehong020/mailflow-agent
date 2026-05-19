@@ -60,13 +60,23 @@ class EmailAnalysisService:
         return len(records)
 
     def analyze_unanalyzed_emails(self, limit: int = 20) -> int:
-        """只分析本地数据库中尚未有分析结果的邮件。"""
+        """同步 Gmail 后，分析本地数据库中尚未有分析结果的邮件。
+
+        Inbox 页面按钮叫“同步并分析邮件”，因此这里先拉取 Gmail 最近邮件，
+        再查询没有 EmailAnalysis 的本地记录。这样第一次使用时不会因为本地
+        没有邮件而显示空列表。
+        """
 
         user = self._current_user()
+        self.sync_recent_emails(limit=limit)
         records = self.db.scalars(
             select(EmailRecord)
             .where(EmailRecord.user_id == user.id)
-            .where(EmailRecord.analysis.is_(None))
+            # analysis 是 ORM relationship，不是普通数据库列。
+            # 判断“尚未有关联分析结果”要使用 has()，不能写成
+            # EmailRecord.analysis.is_(None)，否则 SQLAlchemy 会把 relationship
+            # comparator 的内部函数暴露成异常信息。
+            .where(~EmailRecord.analysis.has())
             .order_by(EmailRecord.received_at.desc().nullslast())
             .limit(limit)
         ).all()
@@ -78,7 +88,14 @@ class EmailAnalysisService:
     def reanalyze_email(self, email: EmailRecord) -> EmailAnalysis:
         """强制重新分析单封邮件。"""
 
+        existing_analysis = email.analysis
         result = self.graph.run(email)
+        if existing_analysis is not None and not self._analysis_is_degraded(existing_analysis):
+            if self._result_is_degraded(result):
+                # 重新分析依赖外部 LLM。模型临时不可用或输出不合规时，Agent 会
+                # 返回降级结果。此时不能把数据库中已有的高质量分析覆盖掉，
+                # 否则用户会看到“之前有分析，重新分析后反而变差/消失”。
+                return existing_analysis
         return self._save_analysis(email=email, result=result)
 
     def _save_analysis(self, *, email: EmailRecord, result: EmailAnalysisGraphResult) -> EmailAnalysis:
@@ -113,6 +130,24 @@ class EmailAnalysisService:
                 )
             )
         return analysis
+
+    @staticmethod
+    def _result_is_degraded(result: EmailAnalysisGraphResult) -> bool:
+        """判断本次 Agent 结果是否来自降级兜底。"""
+
+        return (
+            result.summary.summary.startswith("模型输出校验或调用失败")
+            or result.triage.reason.startswith("模型输出校验或调用失败")
+        )
+
+    @staticmethod
+    def _analysis_is_degraded(analysis: EmailAnalysis) -> bool:
+        """判断数据库里的分析是否已经是降级结果。"""
+
+        return (
+            analysis.summary.startswith("模型输出校验或调用失败")
+            or analysis.reason.startswith("模型输出校验或调用失败")
+        )
 
     def analyze_email(self, email: EmailRecord) -> EmailAnalysis:
         """运行三个 Agent，并保存分析结果。"""
@@ -225,10 +260,28 @@ class EmailAnalysisService:
         """查询邮件详情，包含分析结果和任务。"""
 
         user = self._current_user()
-        return self.db.scalars(
+        record = self.db.scalars(
             select(EmailRecord)
             .options(joinedload(EmailRecord.analysis), joinedload(EmailRecord.tasks))
             .where(EmailRecord.user_id == user.id, EmailRecord.id == email_id)
+        ).unique().first()
+        if record is not None:
+            return record
+
+        # 开发阶段用户可能会断开 Google 后重新授权。旧用户被删除后，浏览器里
+        # 仍可能停留在旧 EmailRecord 的详情 URL 上。此时不要直接让前端显示
+        # “尚未分析”，而是根据同一个 Gmail message id 找到当前用户重新同步
+        # 后的那条记录，并返回它已经保存的分析结果。
+        stale_record = self.db.scalars(select(EmailRecord).where(EmailRecord.id == email_id)).first()
+        if stale_record is None:
+            return None
+        return self.db.scalars(
+            select(EmailRecord)
+            .options(joinedload(EmailRecord.analysis), joinedload(EmailRecord.tasks))
+            .where(
+                EmailRecord.user_id == user.id,
+                EmailRecord.gmail_message_id == stale_record.gmail_message_id,
+            )
         ).unique().first()
 
     def _current_user(self) -> User:

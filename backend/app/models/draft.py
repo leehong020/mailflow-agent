@@ -25,7 +25,7 @@ class DraftPreview(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
-    source_email_id: Mapped[str] = mapped_column(String(36), ForeignKey("email_records.id"), index=True)
+    source_email_id: Mapped[str] = mapped_column(String(36), ForeignKey("email_records.id"), index=True, default="")
     to: Mapped[str] = mapped_column(Text, default="")
     subject: Mapped[str] = mapped_column(Text, default="")
     body: Mapped[str] = mapped_column(Text, default="")

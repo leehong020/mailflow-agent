@@ -12,6 +12,8 @@
 
 在 APIs & Services 中启用 Gmail API。
 
+如果要使用第六阶段日程能力，还需要启用 Google Calendar API。
+
 ## 4. 创建 OAuth Client
 
 类型选择 Web application，添加回调地址：
@@ -43,6 +45,11 @@ openid
 https://www.googleapis.com/auth/userinfo.email
 https://www.googleapis.com/auth/userinfo.profile
 https://www.googleapis.com/auth/gmail.readonly
+https://www.googleapis.com/auth/gmail.compose
+https://www.googleapis.com/auth/gmail.send
+https://www.googleapis.com/auth/gmail.modify
+https://www.googleapis.com/auth/calendar.readonly
+https://www.googleapis.com/auth/calendar.events
 ```
 
-当前阶段只读取 Gmail，不申请发送、删除、修改邮件权限。
+这些 scope 与新版开发路线保持一致：前八阶段已经使用 Gmail 读取、草稿创建、Calendar 读取和日程创建；第九、十阶段会继续使用 `gmail.modify` 和 `gmail.send` 实现标签修改、归档、发送等能力。即使具备发送或修改权限，系统仍通过 Pending Actions 做二次确认，不会自动发送或修改邮件。

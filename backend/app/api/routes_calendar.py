@@ -7,10 +7,12 @@ from app.db.session import get_db
 from app.schemas.calendar import (
     CalendarEventInfo,
     CalendarEventsResponse,
+    CalendarEventMutationRequest,
     CalendarSlotInfo,
     CalendarSuggestionInfo,
     CreateCalendarPendingActionRequest,
     CreateCalendarPendingActionResponse,
+    DeleteCalendarEventPendingRequest,
     SuggestSlotsRequest,
     SuggestSlotsResponse,
 )
@@ -63,6 +65,91 @@ def list_calendar_events(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     return CalendarEventsResponse(items=[CalendarEventInfo(**item) for item in items], total=total)
+
+
+@router.post("/events/pending", response_model=CreateCalendarPendingActionResponse)
+def create_manual_calendar_event_pending(
+    payload: CalendarEventMutationRequest,
+    db: Session = Depends(get_db),
+) -> CreateCalendarPendingActionResponse:
+    """手动创建 Calendar Event，并先放入 Pending Actions。"""
+
+    try:
+        action = CalendarService(db).create_manual_event_action(**payload.model_dump())
+        db.commit()
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return CreateCalendarPendingActionResponse(
+        action_id=action.id,
+        status=action.status,
+        message="已创建新增日程的待确认操作，请到 Pending Actions 页面确认。",
+    )
+
+
+@router.get("/events/{event_id}", response_model=CalendarEventInfo)
+def get_calendar_event_detail(event_id: str, db: Session = Depends(get_db)) -> CalendarEventInfo:
+    """Calendar Event Detail 页面读取单个日程详情。"""
+
+    try:
+        item = CalendarService(db).get_event(event_id=event_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return CalendarEventInfo(**item)
+
+
+@router.post("/events/{event_id}/update-pending", response_model=CreateCalendarPendingActionResponse)
+def create_update_calendar_event_pending(
+    event_id: str,
+    payload: CalendarEventMutationRequest,
+    db: Session = Depends(get_db),
+) -> CreateCalendarPendingActionResponse:
+    """修改 Calendar Event，并在进入 Pending Actions 前完成冲突检测。"""
+
+    try:
+        action = CalendarService(db).create_update_event_action(event_id=event_id, **payload.model_dump())
+        db.commit()
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return CreateCalendarPendingActionResponse(
+        action_id=action.id,
+        status=action.status,
+        message="已创建修改日程的待确认操作，请到 Pending Actions 页面确认。",
+    )
+
+
+@router.post("/events/{event_id}/delete-pending", response_model=CreateCalendarPendingActionResponse)
+def create_delete_calendar_event_pending(
+    event_id: str,
+    payload: DeleteCalendarEventPendingRequest,
+    db: Session = Depends(get_db),
+) -> CreateCalendarPendingActionResponse:
+    """删除 Calendar Event，并先放入 Pending Actions。"""
+
+    try:
+        action = CalendarService(db).create_delete_event_action(event_id=event_id, reason=payload.reason)
+        db.commit()
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return CreateCalendarPendingActionResponse(
+        action_id=action.id,
+        status=action.status,
+        message="已创建删除日程的待确认操作，请到 Pending Actions 页面确认。",
+    )
 
 
 @router.get("/suggestions", response_model=list[CalendarSuggestionInfo])

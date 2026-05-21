@@ -31,27 +31,12 @@ export interface DraftPreviewListResponse {
   total: number
 }
 
-export interface UpdateDraftPreviewRequest {
-  tone: string
-  language: string
-  body?: string | null
-  subject?: string | null
-}
-
-export interface UpdateDraftPreviewResponse {
-  draft_preview_id: string
+export interface MailEditorState {
   to: string
   subject: string
   body: string
   tone: string
   language: string
-  generation_reason: string
-}
-
-export interface CreatePendingActionForDraftResponse {
-  action_id: string
-  status: string
-  message: string
 }
 
 export interface PendingActionInfo {
@@ -70,6 +55,17 @@ export interface PendingActionInfo {
 export interface PendingActionListResponse {
   items: PendingActionInfo[]
   total: number
+}
+
+export interface CreateSendActionResponse {
+  action_id: string
+  status: string
+  message: string
+}
+
+export interface DeleteDraftPreviewResponse {
+  status: string
+  message: string
 }
 
 export interface ConfirmActionResponse {

@@ -42,19 +42,30 @@ class GmailTool:
         )
         headers = self._headers(raw.get("payload", {}).get("headers", []))
         body_text = self._extract_text(raw.get("payload", {}))
+        label_ids = raw.get("labelIds", [])
         return {
             "id": raw["id"],
             "thread_id": raw.get("threadId"),
             "subject": headers.get("subject", "(无主题)"),
             "sender": headers.get("from", ""),
             "recipients": self._split_recipients(headers.get("to", "")),
+            "label_ids": label_ids,
+            "is_read": "UNREAD" not in label_ids,
+            "is_starred": "STARRED" in label_ids,
+            "mailbox_status": self._mailbox_status(label_ids),
             "received_at": self._received_at(raw, headers.get("date")),
             "snippet": raw.get("snippet", ""),
             "body_text": body_text,
             "body_preview": body_text[:500] if body_text else None,
         }
 
-    def create_draft(self, *, to: str, subject: str, body: str) -> dict[str, Any]:
+    def create_draft(
+        self,
+        *,
+        to: str,
+        subject: str,
+        body: str,
+    ) -> dict[str, Any]:
         """在 Gmail 中创建草稿。
 
         注意：这里只创建 draft，不发送邮件，符合 Human-in-the-loop 的安全要求。
@@ -72,6 +83,98 @@ class GmailTool:
             .create(userId="me", body={"message": {"raw": raw_message}})
             .execute()
         )
+
+    def send_message(
+        self,
+        *,
+        to: str,
+        subject: str,
+        body: str,
+    ) -> dict[str, Any]:
+        """发送 Gmail 邮件。
+
+        该方法只由 Pending Actions 确认后调用，业务层不会直接暴露“立即发送”。
+        """
+
+        message = EmailMessage()
+        message["To"] = to
+        message["Subject"] = subject
+        message.set_content(body)
+
+        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+        return (
+            self.service.users()
+            .messages()
+            .send(userId="me", body={"raw": raw_message})
+            .execute()
+        )
+
+    def list_labels(self) -> list[dict[str, Any]]:
+        """读取当前 Gmail 账号可用标签。
+
+        label id 才是 Gmail API 修改标签时真正需要的值，前端展示时同时给出
+        name，方便用户选择。
+        """
+
+        response = self.service.users().labels().list(userId="me").execute()
+        return [
+            {
+                "id": item.get("id", ""),
+                "name": item.get("name", ""),
+                "type": item.get("type", ""),
+            }
+            for item in response.get("labels", [])
+        ]
+
+    def modify_message_labels(
+        self,
+        *,
+        message_id: str,
+        add_label_ids: list[str] | None = None,
+        remove_label_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """修改单封邮件的 Gmail labelIds。"""
+
+        return (
+            self.service.users()
+            .messages()
+            .modify(
+                userId="me",
+                id=message_id,
+                body={
+                    "addLabelIds": add_label_ids or [],
+                    "removeLabelIds": remove_label_ids or [],
+                },
+            )
+            .execute()
+        )
+
+    def trash_message(self, *, message_id: str) -> dict[str, Any]:
+        """移动邮件到垃圾箱，不做永久删除。"""
+
+        return self.service.users().messages().trash(userId="me", id=message_id).execute()
+
+    def batch_modify_messages(
+        self,
+        *,
+        message_ids: list[str],
+        add_label_ids: list[str] | None = None,
+        remove_label_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """批量修改邮件标签。
+
+        Gmail batchModify 没有返回每封邮件详情，因此这里只返回本次请求摘要。
+        """
+
+        self.service.users().messages().batchModify(
+            userId="me",
+            body={
+                "ids": message_ids,
+                "addLabelIds": add_label_ids or [],
+                "removeLabelIds": remove_label_ids or [],
+            },
+        ).execute()
+        return {"message_ids": message_ids, "addLabelIds": add_label_ids or [], "removeLabelIds": remove_label_ids or []}
 
     @staticmethod
     def _headers(headers: list[dict[str, str]]) -> dict[str, str]:
@@ -122,3 +225,13 @@ class GmailTool:
             return parsedate_to_datetime(header_date).isoformat()
         except (TypeError, ValueError):
             return header_date
+
+    @staticmethod
+    def _mailbox_status(label_ids: list[str]) -> str:
+        """根据系统标签推导本地邮箱状态。"""
+
+        if "TRASH" in label_ids:
+            return "trash"
+        if "INBOX" not in label_ids:
+            return "archived"
+        return "inbox"

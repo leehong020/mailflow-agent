@@ -39,6 +39,12 @@ class GoogleCalendarTool:
         )
         return [self._event_item(item) for item in response.get("items", [])]
 
+    def get_event(self, *, event_id: str) -> dict[str, Any]:
+        """读取单个 Calendar 事件详情。"""
+
+        raw = self.service.events().get(calendarId="primary", eventId=event_id).execute()
+        return self._event_item(raw)
+
     def query_busy(self, *, time_min: datetime, time_max: datetime) -> list[dict[str, str]]:
         """查询指定范围内已经被占用的时间段。"""
 
@@ -80,6 +86,40 @@ class GoogleCalendarTool:
         }
         return self.service.events().insert(calendarId="primary", body=body).execute()
 
+    def update_event(
+        self,
+        *,
+        event_id: str,
+        summary: str,
+        start: str,
+        end: str,
+        attendees: list[str],
+        description: str = "",
+        location: str = "",
+        timezone: str = "Asia/Shanghai",
+    ) -> dict[str, Any]:
+        """修改主日历中的会议事件。"""
+
+        body: dict[str, Any] = {
+            "summary": summary,
+            "description": description,
+            "location": location,
+            "start": {"dateTime": start, "timeZone": timezone},
+            "end": {"dateTime": end, "timeZone": timezone},
+            "attendees": [{"email": item} for item in attendees if item],
+        }
+        return (
+            self.service.events()
+            .patch(calendarId="primary", eventId=event_id, body=body, sendUpdates="all")
+            .execute()
+        )
+
+    def delete_event(self, *, event_id: str) -> dict[str, Any]:
+        """删除主日历中的会议事件，并通知参会人。"""
+
+        self.service.events().delete(calendarId="primary", eventId=event_id, sendUpdates="all").execute()
+        return {"id": event_id, "deleted": True}
+
     @staticmethod
     def _event_item(raw: dict[str, Any]) -> dict[str, Any]:
         """把 Google event 统一成前端和冲突检测需要的结构。"""
@@ -96,4 +136,5 @@ class GoogleCalendarTool:
             "end": end.get("dateTime") or end.get("date"),
             "html_link": raw.get("htmlLink", ""),
             "attendees": [item.get("email", "") for item in attendees if item.get("email")],
+            "timezone": start.get("timeZone") or end.get("timeZone") or "",
         }

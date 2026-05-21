@@ -6,10 +6,12 @@
         <p>左侧展示原始邮件，右侧展示第三阶段 Agent 分析结果。</p>
       </div>
       <div class="toolbar-actions">
+        <EmailOperationBar v-if="email" :email="email" @updated="applyEmailUpdate" @pending="showMessage" @error="showError" />
         <el-button v-if="email?.analysis?.has_meeting_request" type="primary" @click="handleScheduleMeeting">
           查找会议时间
         </el-button>
-        <el-button :loading="drafting" @click="handleCreateDraft">生成回复草稿</el-button>
+        <el-button :loading="drafting" @click="handleCreateDraft">AI 回复</el-button>
+        <el-button :loading="forwarding" @click="handleForwardDraft">转发邮件</el-button>
         <el-button :loading="reanalyzing" @click="handleReanalyze">重新分析</el-button>
         <el-button @click="router.push('/inbox')">返回 Inbox</el-button>
       </div>
@@ -25,6 +27,7 @@
           <span>发件人：{{ email.sender }}</span>
           <span>收件时间：{{ formatTime(email.received_at) }}</span>
           <span>收件人：{{ email.recipients.join(', ') || '无' }}</span>
+          <span>状态：{{ email.is_read ? '已读' : '未读' }} / {{ email.is_starred ? '星标' : '未星标' }} / {{ mailboxLabel(email.mailbox_status) }}</span>
         </div>
         <div class="email-body">{{ email.body_text || email.snippet || '暂无正文内容' }}</div>
       </section>
@@ -90,6 +93,7 @@
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import EmailOperationBar from '@/components/EmailOperationBar.vue'
 import { createDraftPreview } from '@/api/drafts'
 import { getEmailDetail, reanalyzeEmail } from '@/api/emails'
 import type { EmailDetail } from '@/types/email'
@@ -101,6 +105,7 @@ const error = ref('')
 const message = ref('')
 const reanalyzing = ref(false)
 const drafting = ref(false)
+const forwarding = ref(false)
 
 async function loadDetail() {
   try {
@@ -131,19 +136,45 @@ async function handleCreateDraft() {
   error.value = ''
   message.value = ''
   try {
-    const { data } = await createDraftPreview(String(route.params.id), { tone: 'polite', language: 'en' })
-    message.value = `已生成草稿预览：${data.subject}`
-    router.push({ path: '/drafts', query: { preview: data.draft_preview_id } })
+    router.push({ path: '/reply-workspace', query: { email: String(route.params.id) } })
   } catch (caught: any) {
-    error.value = caught?.response?.data?.detail ?? '生成回复草稿失败。'
+    error.value = caught?.response?.data?.detail ?? '打开 AI 回复工作台失败。'
   } finally {
     drafting.value = false
+  }
+}
+
+async function handleForwardDraft() {
+  forwarding.value = true
+  error.value = ''
+  message.value = ''
+  try {
+    const { data } = await createDraftPreview(String(route.params.id), { tone: 'friendly', language: 'auto' })
+    message.value = `已生成转发草稿：${data.subject}`
+    router.push({ path: '/drafts', query: { preview: data.draft_preview_id } })
+  } catch (caught: any) {
+    error.value = caught?.response?.data?.detail ?? '生成转发草稿失败。'
+  } finally {
+    forwarding.value = false
   }
 }
 
 function handleScheduleMeeting() {
   if (!email.value) return
   router.push({ path: '/calendar', query: { email: email.value.id } })
+}
+
+function applyEmailUpdate(updated: any) {
+  if (!email.value) return
+  email.value = { ...email.value, ...updated, body_text: email.value.body_text, tasks: email.value.tasks }
+}
+
+function showMessage(value: string) {
+  message.value = value
+}
+
+function showError(value: string) {
+  error.value = value
 }
 
 function formatTime(value?: string | null) {
@@ -186,6 +217,11 @@ function priorityTagType(value?: string) {
   if (value === 'high') return 'danger'
   if (value === 'medium') return 'warning'
   return 'info'
+}
+
+function mailboxLabel(value: string) {
+  const labels: Record<string, string> = { inbox: 'Inbox', archived: '已归档', trash: '垃圾箱' }
+  return labels[value] ?? value
 }
 
 onMounted(loadDetail)

@@ -7,6 +7,7 @@ export interface CalendarEventInfo {
   description: string
   html_link: string
   attendees: string[]
+  timezone: string
 }
 
 export interface CalendarEventsResponse {
@@ -52,4 +53,18 @@ export interface CreateCalendarPendingActionResponse {
   action_id: string
   status: string
   message: string
+}
+
+export interface CalendarEventMutationRequest {
+  summary: string
+  start: string
+  end: string
+  location: string
+  description: string
+  timezone: string
+  attendees: string[]
+}
+
+export interface DeleteCalendarEventPendingRequest {
+  reason: string
 }

@@ -19,6 +19,7 @@ export interface TraceInfo {
   output_summary: string
   created_at: string
   completed_at?: string | null
+  duration_ms?: number | null
   events: TraceEventInfo[]
 }
 
@@ -30,6 +31,7 @@ export interface TraceListItem {
   input_summary: string
   output_summary: string
   created_at: string
+  duration_ms?: number | null
 }
 
 // 轨迹列表响应。

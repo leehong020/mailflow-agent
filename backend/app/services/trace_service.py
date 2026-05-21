@@ -79,15 +79,27 @@ class TraceService:
 
         return self.complete_trace(trace, status="failed", output_summary=output_summary)
 
-    def list_traces(self, *, user: User, limit: int = 20, offset: int = 0) -> tuple[list[AgentTrace], int]:
+    def list_traces(
+        self,
+        *,
+        user: User,
+        status: str | None = None,
+        task_type: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[AgentTrace], int]:
         """分页查询轨迹列表。"""
 
         query = (
             select(AgentTrace)
             .options(joinedload(AgentTrace.events))
             .where(AgentTrace.user_id == user.id)
-            .order_by(AgentTrace.created_at.desc())
         )
+        if status:
+            query = query.where(AgentTrace.status == status)
+        if task_type:
+            query = query.where(AgentTrace.task_type == task_type)
+        query = query.order_by(AgentTrace.created_at.desc())
         total = self.db.scalar(select(func.count()).select_from(query.subquery())) or 0
         traces = self.db.scalars(query.offset(offset).limit(limit)).unique().all()
         return list(traces), total

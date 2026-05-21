@@ -8,9 +8,8 @@
 5. 创建待确认的 Calendar Event 操作。
 """
 
-import json
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
@@ -21,6 +20,7 @@ from app.models.calendar import CalendarSuggestion
 from app.models.draft import PendingAction
 from app.models.email import EmailRecord
 from app.models.user import User
+from app.services.action_service import ActionService
 from app.services.auth_service import AuthService
 from app.services.email_analysis_service import EmailAnalysisService
 from app.services.google_service import GoogleService
@@ -41,6 +41,7 @@ class CalendarService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.auth_service = AuthService(db)
+        self.action_service = ActionService(db)
         self.google_service = GoogleService(db)
         self.email_service = EmailAnalysisService(db)
         self.scheduler_agent = CalendarSchedulerAgent()
@@ -52,6 +53,126 @@ class CalendarService:
         start, end = self._range_window(range_name)
         items = self.google_service.list_calendar_events(user=user, time_min=start, time_max=end)
         return items, len(items)
+
+    def get_event(self, *, event_id: str) -> dict:
+        """读取单个 Calendar 事件详情。"""
+
+        user = self._current_user()
+        return self.google_service.get_calendar_event(user=user, event_id=event_id)
+
+    def create_manual_event_action(
+        self,
+        *,
+        summary: str,
+        start: str,
+        end: str,
+        attendees: list[str],
+        description: str = "",
+        location: str = "",
+        timezone: str = "Asia/Shanghai",
+    ) -> PendingAction:
+        """创建手动新增 Calendar 事件的待确认操作。"""
+
+        self._ensure_no_event_conflict(
+            start=start,
+            end=end,
+            timezone_name=timezone,
+            exclude_event_id=None,
+        )
+        attendees = self._normalize_attendees(attendees)
+        payload = {
+            "summary": summary,
+            "start": start,
+            "end": end,
+            "attendees": attendees,
+            "description": description,
+            "location": location,
+            "timezone": timezone,
+        }
+        preview = {
+            "操作": "创建 Google Calendar 日程",
+            "标题": summary,
+            "开始时间": start,
+            "结束时间": end,
+            "参会人": attendees,
+            "地点": location,
+        }
+        return self.action_service.create_action(
+            action_type="create_calendar_event",
+            payload=payload,
+            preview=preview,
+        )
+
+    def create_update_event_action(
+        self,
+        *,
+        event_id: str,
+        summary: str,
+        start: str,
+        end: str,
+        attendees: list[str],
+        description: str = "",
+        location: str = "",
+        timezone: str = "Asia/Shanghai",
+    ) -> PendingAction:
+        """创建修改 Calendar 事件的待确认操作。
+
+        修改时间属于高风险操作，必须先做冲突检测。检测时会排除当前 event_id，
+        避免把“被修改的原事件”误判为冲突。
+        """
+
+        old_event = self.get_event(event_id=event_id)
+        self._ensure_no_event_conflict(
+            start=start,
+            end=end,
+            timezone_name=timezone,
+            exclude_event_id=event_id,
+        )
+        attendees = self._normalize_attendees(attendees)
+        payload = {
+            "event_id": event_id,
+            "summary": summary,
+            "start": start,
+            "end": end,
+            "attendees": attendees,
+            "description": description,
+            "location": location,
+            "timezone": timezone,
+        }
+        preview = {
+            "操作": "修改 Google Calendar 日程",
+            "事件ID": event_id,
+            "原标题": old_event.get("summary", ""),
+            "新标题": summary,
+            "原时间": f"{old_event.get('start', '')} - {old_event.get('end', '')}",
+            "新时间": f"{start} - {end}",
+            "参会人": attendees,
+            "地点": location,
+        }
+        return self.action_service.create_action(
+            action_type="modify_calendar_event",
+            payload=payload,
+            preview=preview,
+        )
+
+    def create_delete_event_action(self, *, event_id: str, reason: str = "") -> PendingAction:
+        """创建删除 Calendar 事件的待确认操作。"""
+
+        old_event = self.get_event(event_id=event_id)
+        payload = {"event_id": event_id, "reason": reason}
+        preview = {
+            "操作": "删除 Google Calendar 日程",
+            "事件ID": event_id,
+            "标题": old_event.get("summary", ""),
+            "时间": f"{old_event.get('start', '')} - {old_event.get('end', '')}",
+            "参会人": old_event.get("attendees", []),
+            "删除原因": reason,
+        }
+        return self.action_service.create_action(
+            action_type="delete_calendar_event",
+            payload=payload,
+            preview=preview,
+        )
 
     def list_suggestions(self, *, limit: int = 20, offset: int = 0) -> tuple[list[CalendarSuggestion], int]:
         """查询当前用户已生成的日程建议。"""
@@ -133,14 +254,19 @@ class CalendarService:
             "start": selected_slot["start"],
             "end": selected_slot["end"],
         }
-        action = PendingAction(
-            user_id=user.id,
+        preview = {
+            "会议标题": suggestion.meeting_title,
+            "开始时间": selected_slot["start"],
+            "结束时间": selected_slot["end"],
+            "参会人": suggestion.participants,
+            "地点": suggestion.location,
+            "关联邮件": suggestion.source_email_id,
+        }
+        action = self.action_service.create_action(
             action_type="create_calendar_event",
-            payload=json.dumps(payload, ensure_ascii=False),
-            preview=json.dumps(payload, ensure_ascii=False),
-            risk_level="high",
+            payload=payload,
+            preview=preview,
         )
-        self.db.add(action)
         self.db.flush()
         return action
 
@@ -225,6 +351,52 @@ class CalendarService:
             current_day += timedelta(days=1)
 
         return slots
+
+    def _ensure_no_event_conflict(
+        self,
+        *,
+        start: str,
+        end: str,
+        timezone_name: str,
+        exclude_event_id: str | None,
+    ) -> None:
+        """校验目标时间段是否和已有 Calendar 事件冲突。"""
+
+        user = self._current_user()
+        tz = self._safe_zoneinfo(timezone_name)
+        start_at = self._parse_datetime(start, tz)
+        end_at = self._parse_datetime(end, tz)
+        if start_at is None or end_at is None:
+            raise ValueError("日程开始或结束时间格式无效。")
+        if end_at <= start_at:
+            raise ValueError("日程结束时间必须晚于开始时间。")
+
+        events = self.google_service.list_calendar_events(user=user, time_min=start_at, time_max=end_at)
+        for event in events:
+            if exclude_event_id and event.get("id") == exclude_event_id:
+                continue
+            event_start = self._parse_datetime(event.get("start"), tz)
+            event_end = self._parse_datetime(event.get("end"), tz)
+            if event_start and event_end and self._has_conflict(start_at, end_at, [(event_start, event_end)]):
+                title = event.get("summary") or "已有日程"
+                raise ValueError(f"该时间段与已有日程“{title}”冲突，请调整时间后再提交。")
+
+    @staticmethod
+    def _normalize_attendees(attendees: list[str]) -> list[str]:
+        """清洗参会人邮箱，去重并过滤空值。"""
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in attendees:
+            email = str(item or "").strip()
+            if not email or "@" not in email:
+                continue
+            key = email.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(email)
+        return normalized
 
     @staticmethod
     def _has_conflict(start: datetime, end: datetime, busy_ranges: list[tuple[datetime, datetime]]) -> bool:

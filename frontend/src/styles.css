@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #182230;
@@ -180,10 +180,60 @@ a {
   font-size: 26px;
 }
 
+.stat-card small {
+  color: #657082;
+}
+
 .content-band,
 .settings-panel,
 .empty-block {
   padding: 22px;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.breakdown-list,
+.recent-list {
+  display: grid;
+  gap: 10px;
+}
+
+.breakdown-row,
+.recent-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f6f7f9;
+}
+
+.recent-row {
+  flex-direction: column;
+  align-items: flex-start;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.recent-row span {
+  color: #657082;
+  overflow-wrap: anywhere;
 }
 
 .account-row {
@@ -234,6 +284,10 @@ a {
   white-space: nowrap;
 }
 
+.email-card h3.unread {
+  font-weight: 800;
+}
+
 .email-card-sender {
   display: block;
   margin-top: 4px;
@@ -270,6 +324,24 @@ a {
   gap: 8px;
 }
 
+.inbox-search {
+  width: 280px;
+}
+
+.inbox-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: #657082;
+}
+
+.inbox-status-row span {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid #e1e5ea;
+}
+
 .triage-tab {
   min-height: 36px;
   padding: 0 14px;
@@ -291,6 +363,214 @@ a {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
+}
+
+.email-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.email-operation-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.email-operation-bar .el-button {
+  width: 32px;
+  padding: 7px;
+}
+
+.label-action-popover {
+  display: grid;
+  gap: 10px;
+}
+
+.compose-panel {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #e1e5ea;
+  background: #ffffff;
+  border-radius: 8px;
+}
+
+.compose-panel h3 {
+  margin: 0;
+}
+
+.ai-reply-workspace {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+.workspace-left {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.source-mail-strip,
+.mail-editor,
+.compose-assistant-panel {
+  border: 1px solid #e1e5ea;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 18px;
+}
+
+.source-mail-strip {
+  display: grid;
+  gap: 6px;
+}
+
+.source-mail-strip span,
+.source-mail-strip p,
+.mail-editor-header p,
+.compose-assistant-panel p {
+  color: #657082;
+}
+
+.source-mail-strip p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mail-editor {
+  display: grid;
+  gap: 14px;
+}
+
+.mail-editor-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.mail-editor-header h3,
+.compose-assistant-panel h3 {
+  margin: 0;
+}
+
+.editor-inline-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.mail-address-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.mail-address-grid label,
+.mail-editor-field {
+  display: grid;
+  gap: 6px;
+  color: #475467;
+  font-weight: 600;
+}
+
+.compose-assistant-panel {
+  display: grid;
+  gap: 14px;
+  position: sticky;
+  top: 18px;
+}
+
+.assistant-messages {
+  display: grid;
+  gap: 10px;
+  max-height: 620px;
+  overflow: auto;
+}
+
+.draft-record-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.draft-record-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  background: #ffffff;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.draft-record-card:hover {
+  border-color: #175cd3;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
+}
+
+.draft-record-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.draft-record-head h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.draft-record-head span,
+.draft-record-card small {
+  color: #657082;
+}
+
+.draft-record-card p {
+  margin: 0;
+  color: #475467;
+  line-height: 1.6;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+.draft-record-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #657082;
+}
+
+.draft-record-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.assistant-message,
+.assistant-empty {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f6f7f9;
+}
+
+.assistant-message.user {
+  background: #eef4ff;
+}
+
+.assistant-message p,
+.assistant-empty p {
+  margin: 0;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 
 .detail-grid {
@@ -329,6 +609,10 @@ a {
 .trace-list {
   display: grid;
   gap: 10px;
+}
+
+.trace-filter {
+  width: 160px;
 }
 
 .trace-card {
@@ -482,14 +766,25 @@ a {
   align-items: start;
 }
 
+.event-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 18px;
+  align-items: start;
+}
+
 .calendar-main-panel,
-.calendar-side-panel {
+.calendar-side-panel,
+.event-editor-panel,
+.event-preview-panel {
   border: 1px solid #e1e5ea;
   border-radius: 8px;
   background: #ffffff;
 }
 
-.calendar-main-panel {
+.calendar-main-panel,
+.event-editor-panel,
+.event-preview-panel {
   padding: 18px;
   min-width: 0;
 }
@@ -508,6 +803,32 @@ a {
 
 .calendar-side-section h3 {
   margin: 0;
+}
+
+.event-editor-panel h3,
+.event-preview-panel h3 {
+  margin-top: 0;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.compact-grid {
+  gap: 8px;
+}
+
+.attendee-editor {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  width: 100%;
+}
+
+.attendee-editor .el-tag {
+  justify-self: start;
 }
 
 .calendar-email-input {
@@ -597,12 +918,32 @@ a {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
   .detail-grid {
     grid-template-columns: 1fr;
   }
 
+  .inbox-search,
+  .trace-filter {
+    width: 100%;
+  }
+
   .calendar-planner-layout {
     grid-template-columns: 1fr;
+  }
+
+  .ai-reply-workspace,
+  .event-detail-layout,
+  .mail-address-grid,
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .compose-assistant-panel {
+    position: static;
   }
 
   .calendar-email-input {

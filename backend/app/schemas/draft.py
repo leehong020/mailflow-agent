@@ -27,6 +27,14 @@ class CreateDraftPreviewRequest(BaseModel):
     language: str = "en"
 
 
+class CreateManualDraftRequest(BaseModel):
+    to: str
+    subject: str
+    body: str
+    tone: str = "manual"
+    language: str = "zh"
+
+
 class CreateDraftPreviewResponse(BaseModel):
     draft_preview_id: str
     to: str
@@ -39,6 +47,7 @@ class CreateDraftPreviewResponse(BaseModel):
 class UpdateDraftPreviewRequest(BaseModel):
     tone: str = "polite"
     language: str = "en"
+    to: str | None = None
     body: str | None = None
     subject: str | None = None
 
@@ -53,10 +62,32 @@ class UpdateDraftPreviewResponse(BaseModel):
     generation_reason: str = ""
 
 
+class DeleteDraftPreviewResponse(BaseModel):
+    status: str
+    message: str
+
+
 class CreatePendingActionForDraftResponse(BaseModel):
     action_id: str
     status: str
     message: str
+
+
+class CreateSendActionResponse(BaseModel):
+    action_id: str
+    status: str
+    message: str
+
+
+class ReviseDraftPreviewRequest(BaseModel):
+    """AI 回复工作台中的草稿修改请求。"""
+
+    instruction: str
+    to: str
+    subject: str
+    body: str
+    tone: str = "polite"
+    language: str = "auto"
 
 
 class PendingActionInfo(BaseModel):

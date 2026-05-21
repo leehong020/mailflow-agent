@@ -1,6 +1,6 @@
 """邮件接口响应结构。"""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class EmailAnalysisInfo(BaseModel):
@@ -36,6 +36,10 @@ class EmailListItem(BaseModel):
     subject: str
     sender: str
     recipients: list[str] = []
+    label_ids: list[str] = []
+    is_read: bool = True
+    is_starred: bool = False
+    mailbox_status: str = "inbox"
     received_at: str | None = None
     snippet: str
     body_preview: str | None = None
@@ -47,6 +51,8 @@ class EmailListResponse(BaseModel):
 
     items: list[EmailListItem]
     total: int
+    analyzed_total: int = 0
+    unanalyzed_total: int = 0
 
 
 class EmailDetailResponse(EmailListItem):
@@ -69,6 +75,25 @@ class AnalyzeEmailsResponse(BaseModel):
     status: str
     analyzed_count: int
     message: str
+    trace_ids: list[str] = []
+
+
+class SyncEmailsResponse(BaseModel):
+    """同步 Gmail 响应。"""
+
+    status: str
+    synced_count: int
+    message: str
+
+
+class SyncEmailsRequest(BaseModel):
+    """同步 Gmail 最近邮件的请求参数。
+
+    该请求只负责把 Gmail 最新邮件保存/更新到本地数据库，不会触发大模型分析。
+    给 limit 设置上限，可以避免刷新看板时一次拉取过多邮件导致接口响应变慢。
+    """
+
+    limit: int = Field(default=20, ge=1, le=50)
 
 
 class ReanalyzeEmailResponse(BaseModel):
@@ -76,3 +101,42 @@ class ReanalyzeEmailResponse(BaseModel):
 
     status: str
     message: str
+
+
+class GmailLabelInfo(BaseModel):
+    """Gmail 标签信息。"""
+
+    id: str
+    name: str
+    type: str = ""
+
+
+class GmailLabelListResponse(BaseModel):
+    """Gmail 标签列表响应。"""
+
+    items: list[GmailLabelInfo]
+
+
+class EmailOperationResponse(BaseModel):
+    """单封邮件操作响应。"""
+
+    status: str
+    message: str
+    action_id: str | None = None
+    email: EmailListItem | None = None
+
+
+class LabelActionRequest(BaseModel):
+    """修改标签请求。"""
+
+    add_label_ids: list[str] = []
+    remove_label_ids: list[str] = []
+
+
+class BatchEmailActionRequest(BaseModel):
+    """批量邮件操作请求。"""
+
+    email_ids: list[str]
+    operation: str
+    add_label_ids: list[str] = []
+    remove_label_ids: list[str] = []

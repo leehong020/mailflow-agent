@@ -43,7 +43,7 @@ class ReplyDraftAgent(BaseLLMAgent):
         analysis_reason = email.analysis.reason if email.analysis else ""
         data = self.run_json(
             user_prompt=(
-                "请根据下面的邮件和用户偏好生成一封待审核回复草稿。\n\n"
+                "请根据下面的邮件内容和用户本次要求生成一封待审核回复草稿。\n\n"
                 f"回复语气：{tone}\n"
                 f"回复语言：{language}\n"
                 f"邮件分析摘要：{analysis_summary}\n"
@@ -55,6 +55,76 @@ class ReplyDraftAgent(BaseLLMAgent):
         return ReplyDraftResult(
             to=output.to,
             subject=self._subject(output.subject, email.subject),
+            body=output.body,
+            generation_reason=output.generation_reason,
+        )
+
+    def revise(
+        self,
+        *,
+        email: EmailRecord | None,
+        to: str,
+        subject: str,
+        body: str,
+        instruction: str,
+        tone: str = "polite",
+        language: str = "auto",
+    ) -> ReplyDraftResult:
+        """根据用户自然语言要求修改当前草稿。
+
+        该方法用于第十一阶段 AI 回复工作台。它不会创建外部 Gmail 草稿，
+        只返回新的编辑器内容，由 DraftService 保存到本地 DraftPreview。
+        """
+
+        try:
+            return self._revise_with_llm(
+                email=email,
+                to=to,
+                subject=subject,
+                body=body,
+                instruction=instruction,
+                tone=tone,
+                language=language,
+            )
+        except Exception as exc:
+            return ReplyDraftResult(
+                to=to,
+                subject=subject,
+                body=body,
+                generation_reason=f"AI 修改失败，已保留原草稿内容。原因：{BaseLLMAgent.error_summary(exc, limit=120)}",
+            )
+
+    def _revise_with_llm(
+        self,
+        *,
+        email: EmailRecord | None,
+        to: str,
+        subject: str,
+        body: str,
+        instruction: str,
+        tone: str,
+        language: str,
+    ) -> ReplyDraftResult:
+        """调用大模型按用户修改要求重写草稿。"""
+
+        email_context = self.build_email_context(email) if email is not None else "无原始邮件上下文。"
+        data = self.run_json(
+            user_prompt=(
+                "请根据用户的修改要求，更新当前邮件草稿。必须保留用户没有要求改变的关键信息。\n\n"
+                f"回复语气：{tone}\n"
+                f"回复语言：{language}\n"
+                f"用户修改要求：{instruction}\n\n"
+                "当前草稿：\n"
+                f"To: {to}\n"
+                f"Subject: {subject}\n"
+                f"Body:\n{body}\n\n"
+                f"原始邮件上下文：\n{email_context}"
+            ),
+        )
+        output = self.validate_llm_output(ReplyDraftLLMOutput, data)
+        return ReplyDraftResult(
+            to=output.to or to,
+            subject=output.subject or subject,
             body=output.body,
             generation_reason=output.generation_reason,
         )

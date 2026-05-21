@@ -4,17 +4,13 @@ Service 层承接业务规则：
 - 当前用户如何查询；
 - Google 用户如何保存；
 - token 如何加密后入库；
-- 断开连接时如何清理本地数据。
+- 断开连接时如何仅清除授权 token，并保留本地分析数据。
 """
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import decrypt_text, encrypt_text
-from app.models.calendar import CalendarSuggestion
-from app.models.draft import DraftPreview, PendingAction
-from app.models.email import EmailAnalysis, EmailRecord, TaskItem
-from app.models.trace import AgentTrace, AgentTraceEvent
 from app.models.user import User
 
 
@@ -27,11 +23,15 @@ class AuthService:
     def get_current_user(self) -> User | None:
         """获取当前演示账号。
 
-        第一二阶段暂不做复杂登录态，默认取最近更新的 Google 用户。
+        第一二阶段暂不做复杂登录态，默认取最近更新且仍保存 token 的 Google 用户。
         这样课程演示时一个浏览器即可完整跑通。
         """
 
-        return self.db.scalars(select(User).order_by(User.updated_at.desc())).first()
+        return self.db.scalars(
+            select(User)
+            .where(User.encrypted_google_token != "")
+            .order_by(User.updated_at.desc())
+        ).first()
 
     def save_google_user(self, profile: dict, credentials) -> User:
         """保存或更新 Google 用户资料与 OAuth token。"""
@@ -63,34 +63,17 @@ class AuthService:
         return decrypt_text(user.encrypted_google_token)
 
     def disconnect_google(self) -> None:
-        """删除本地保存的 Google 连接信息。"""
+        """断开 Google 授权，但保留本地邮件、分析、草稿和轨迹数据。
+
+        之前这里会删除 User 以及该用户下的全部工作区数据，导致用户为了新增
+        scope 重新授权后，已经分析过的邮件全部变成“未分析”。现在只清空本地
+        token 和 scope：Settings 会显示未连接；重新连接同一邮箱时会复用同一个
+        User 记录，因此 email_analysis / tasks 等历史结果仍然能通过 user_id 找到。
+        """
 
         user = self.get_current_user()
         if user is None:
             return
-        self._delete_user_workspace(user.id)
-        self.db.delete(user)
+        user.encrypted_google_token = ""
+        user.google_scopes = ""
         self.db.commit()
-
-    def _delete_user_workspace(self, user_id: str) -> None:
-        """删除演示账号下的本地工作区数据。
-
-        断开 Google 账号代表当前本地授权失效。清掉关联邮件、分析、草稿、
-        日程建议和轨迹，可以避免重新授权后旧 EmailRecord ID 继续混入前端，
-        造成“数据库有分析但页面显示未分析”的错觉。
-        """
-
-        email_ids = self.db.scalars(select(EmailRecord.id).where(EmailRecord.user_id == user_id)).all()
-        trace_ids = self.db.scalars(select(AgentTrace.id).where(AgentTrace.user_id == user_id)).all()
-
-        if email_ids:
-            self.db.execute(delete(TaskItem).where(TaskItem.source_email_id.in_(email_ids)))
-            self.db.execute(delete(EmailAnalysis).where(EmailAnalysis.email_id.in_(email_ids)))
-        if trace_ids:
-            self.db.execute(delete(AgentTraceEvent).where(AgentTraceEvent.trace_id.in_(trace_ids)))
-
-        self.db.execute(delete(PendingAction).where(PendingAction.user_id == user_id))
-        self.db.execute(delete(DraftPreview).where(DraftPreview.user_id == user_id))
-        self.db.execute(delete(CalendarSuggestion).where(CalendarSuggestion.user_id == user_id))
-        self.db.execute(delete(AgentTrace).where(AgentTrace.user_id == user_id))
-        self.db.execute(delete(EmailRecord).where(EmailRecord.user_id == user_id))

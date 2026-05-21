@@ -23,6 +23,25 @@
 
       <aside class="calendar-side-panel">
         <div class="calendar-side-section">
+          <h3>手动创建日程</h3>
+          <el-input v-model="manualForm.summary" placeholder="标题" />
+          <div class="form-grid compact-grid">
+            <el-input v-model="manualForm.start" placeholder="开始：2026-05-20T10:00:00+08:00" />
+            <el-input v-model="manualForm.end" placeholder="结束：2026-05-20T10:30:00+08:00" />
+          </div>
+          <el-input v-model="manualForm.location" placeholder="地点" />
+          <el-input v-model="manualAttendee" placeholder="参会人邮箱，回车添加" @keyup.enter="addManualAttendee" />
+          <div v-if="manualForm.attendees.length" class="tag-row">
+            <el-tag v-for="item in manualForm.attendees" :key="item" closable @close="removeManualAttendee(item)">
+              {{ item }}
+            </el-tag>
+          </div>
+          <el-button type="primary" :loading="creatingManual" @click="handleCreateManualEvent">
+            创建待确认操作
+          </el-button>
+        </div>
+
+        <div class="calendar-side-section">
           <h3>会议请求</h3>
           <div v-if="currentSuggestion" class="meeting-request-card">
             <strong>{{ currentSuggestion.meeting_title }}</strong>
@@ -100,12 +119,18 @@ import interactionPlugin from '@fullcalendar/interaction'
 import timeGridPlugin from '@fullcalendar/timegrid'
 
 import {
+  createManualCalendarEventAction,
   createPendingCalendarAction,
   getCalendarEvents,
   getCalendarSuggestions,
   suggestCalendarSlots,
 } from '@/api/calendar'
-import type { CalendarEventInfo, CalendarSlotInfo, CalendarSuggestionInfo } from '@/types/calendar'
+import type {
+  CalendarEventInfo,
+  CalendarEventMutationRequest,
+  CalendarSlotInfo,
+  CalendarSuggestionInfo,
+} from '@/types/calendar'
 
 const route = useRoute()
 const router = useRouter()
@@ -118,8 +143,19 @@ const durationMinutes = ref(30)
 const loadingEvents = ref(false)
 const suggesting = ref(false)
 const creatingPending = ref(false)
+const creatingManual = ref(false)
 const error = ref('')
 const message = ref('')
+const manualAttendee = ref('')
+const manualForm = ref<CalendarEventMutationRequest>({
+  summary: '',
+  start: '',
+  end: '',
+  location: '',
+  description: '',
+  timezone: 'Asia/Shanghai',
+  attendees: [],
+})
 
 // FullCalendar 的配置统一放在 computed 中，事件刷新后视图会自动更新。
 const calendarOptions = computed(() => ({
@@ -138,6 +174,11 @@ const calendarOptions = computed(() => ({
     start: item.start,
     end: item.end,
   })),
+  eventClick: (info: { event: { id: string } }) => {
+    if (info.event.id) {
+      router.push(`/calendar/events/${info.event.id}`)
+    }
+  },
 }))
 
 async function loadEvents() {
@@ -204,6 +245,32 @@ async function handleCreatePending() {
     error.value = caught?.response?.data?.detail ?? '创建待确认日程操作失败。'
   } finally {
     creatingPending.value = false
+  }
+}
+
+function addManualAttendee() {
+  const value = manualAttendee.value.trim()
+  if (!value || !value.includes('@') || manualForm.value.attendees.includes(value)) return
+  manualForm.value.attendees = [...manualForm.value.attendees, value]
+  manualAttendee.value = ''
+}
+
+function removeManualAttendee(value: string) {
+  manualForm.value.attendees = manualForm.value.attendees.filter((item) => item !== value)
+}
+
+async function handleCreateManualEvent() {
+  creatingManual.value = true
+  error.value = ''
+  message.value = ''
+  try {
+    const { data } = await createManualCalendarEventAction(manualForm.value)
+    message.value = data.message
+    router.push('/pending-actions')
+  } catch (caught: any) {
+    error.value = caught?.response?.data?.detail ?? '创建日程待确认操作失败。'
+  } finally {
+    creatingManual.value = false
   }
 }
 

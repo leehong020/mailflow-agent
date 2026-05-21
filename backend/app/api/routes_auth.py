@@ -25,6 +25,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 REQUIRED_GMAIL_SCOPES = {
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.compose",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.modify",
 }
 
 
@@ -99,8 +101,9 @@ def complete_google_callback(request: Request, state: str, db: Session) -> Redir
         )
 
     # Google 回调会带上本次用户实际授予的 scope。
-    # 第五阶段既要读取 Gmail，又要创建 Gmail 草稿，因此必须同时具备
-    # gmail.readonly 和 gmail.compose。
+    # 新版开发文档把 Gmail 管理和发送能力列入后续路线，因此 OAuth 阶段
+    # 统一申请读取、草稿、发送和标签/归档修改权限。后续真正发送或修改
+    # 邮件时，仍必须进入 Pending Actions 二次确认。
     callback_scopes = _scope_set(request.query_params.get("scope"))
     missing_callback_scopes = REQUIRED_GMAIL_SCOPES - callback_scopes if callback_scopes else set()
     if missing_callback_scopes:
@@ -108,7 +111,8 @@ def complete_google_callback(request: Request, state: str, db: Session) -> Redir
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
                 "Google 未授予 Gmail 所需权限。请在 Google Cloud Console 的 "
-                "OAuth consent screen / Data Access 中添加 gmail.readonly 和 gmail.compose scope，"
+                "OAuth consent screen / Data Access 中添加 gmail.readonly、gmail.compose、"
+                "gmail.send 和 gmail.modify scope，"
                 "并确认已启用 Gmail API，"
                 "然后从 Settings 页面重新连接 Google。"
             ),
@@ -124,7 +128,7 @@ def complete_google_callback(request: Request, state: str, db: Session) -> Redir
     if missing_granted_scopes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Google token 中缺少 Gmail 读取或草稿创建权限，请检查 OAuth consent screen 的 scope 配置。",
+            detail="Google token 中缺少 Gmail 读取、草稿、发送或标签修改权限，请检查 OAuth consent screen 的 scope 配置。",
         )
 
     # 读取 Google 用户基本信息，用 email 作为当前阶段的账号标识。
@@ -156,6 +160,7 @@ def google_status(db: Session = Depends(get_db)) -> GoogleConnectionStatus:
 def google_disconnect(db: Session = Depends(get_db)) -> dict[str, str]:
     """断开本地 Google 连接；不会删除 Google 账号中的任何数据。"""
 
-    # 当前操作只删除本地保存的用户与 token，不会调用 Gmail 删除任何邮件。
+    # 这里只清除本地 OAuth token，不删除已同步邮件和 Agent 分析结果。
+    # 这样用户为了新增 scope 重新授权时，不会丢失 email_analysis 历史数据。
     AuthService(db).disconnect_google()
     return {"status": "disconnected"}

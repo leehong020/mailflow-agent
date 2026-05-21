@@ -26,6 +26,7 @@ class TraceInfo(BaseModel):
     output_summary: str = ""
     created_at: str
     completed_at: str | None = None
+    duration_ms: int | None = None
     events: list[TraceEventInfo] = []
 
 
@@ -38,6 +39,7 @@ class TraceListItem(BaseModel):
     input_summary: str = ""
     output_summary: str = ""
     created_at: str
+    duration_ms: int | None = None
 
 
 class TraceListResponse(BaseModel):

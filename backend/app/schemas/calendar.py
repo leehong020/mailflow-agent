@@ -14,6 +14,7 @@ class CalendarEventInfo(BaseModel):
     description: str = ""
     html_link: str = ""
     attendees: list[str] = []
+    timezone: str = "Asia/Shanghai"
 
 
 class CalendarEventsResponse(BaseModel):
@@ -67,3 +68,25 @@ class CreateCalendarPendingActionResponse(BaseModel):
     action_id: str
     status: str
     message: str
+
+
+class CalendarEventMutationRequest(BaseModel):
+    """手动创建或修改 Calendar 事件的表单参数。
+
+    写操作不会直接调用 Google Calendar，而是先由 Service 做基础校验和冲突检测，
+    再创建 PendingAction 等待用户确认。
+    """
+
+    summary: str = Field(min_length=1, max_length=200)
+    start: str
+    end: str
+    location: str = ""
+    description: str = ""
+    timezone: str = "Asia/Shanghai"
+    attendees: list[str] = []
+
+
+class DeleteCalendarEventPendingRequest(BaseModel):
+    """删除 Calendar 事件的待确认请求。"""
+
+    reason: str = "用户在 MailFlow Agent 中手动删除日程。"

@@ -223,6 +223,56 @@ class ReplyDraftLLMOutput(LLMOutputBase):
         return _clean_text(value, limit=240)
 
 
+class ComposeMailLLMOutput(LLMOutputBase):
+    """Compose Mail Agent 的模型输出。
+
+    主动写邮件时，用户可能一开始没有填写收件人，所以 to 允许为空；
+    但 subject/body/reason 必须有内容，避免前端拿到一封无法编辑的空邮件。
+    """
+
+    to: str = ""
+    subject: str = Field(min_length=1)
+    body: str = Field(min_length=1)
+    generation_reason: str = Field(min_length=1)
+
+    @field_validator("to", mode="before")
+    @classmethod
+    def normalize_to(cls, value: object) -> str:
+        return _clean_text(value, limit=240)
+
+    @field_validator("subject", mode="before")
+    @classmethod
+    def normalize_subject(cls, value: object) -> str:
+        return _clean_text(value, limit=240)
+
+    @field_validator("body", mode="before")
+    @classmethod
+    def normalize_body(cls, value: object) -> str:
+        return _clean_text(value, limit=5000)
+
+    @field_validator("generation_reason", mode="before")
+    @classmethod
+    def normalize_generation_reason(cls, value: object) -> str:
+        return _clean_text(value, limit=240)
+
+
+class MemorySummaryLLMOutput(LLMOutputBase):
+    """Memory Agent 的短期对话压缩输出。"""
+
+    summary: str = Field(min_length=1)
+    key_constraints: list[str] = Field(default_factory=list, max_length=8)
+
+    @field_validator("summary", mode="before")
+    @classmethod
+    def normalize_summary(cls, value: object) -> str:
+        return _clean_text(value, limit=1000)
+
+    @field_validator("key_constraints", mode="before")
+    @classmethod
+    def normalize_constraints(cls, value: object) -> list[str]:
+        return _clean_text_list(value, limit=8, item_limit=160)
+
+
 class CalendarSchedulerLLMOutput(LLMOutputBase):
     """Calendar Scheduler Agent 的模型输出。"""
 

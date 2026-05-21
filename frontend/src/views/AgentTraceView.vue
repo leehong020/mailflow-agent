@@ -3,9 +3,15 @@
     <div class="section-header">
       <div>
         <h2>Agent Trace</h2>
-        <p>这里展示多 Agent 工作流的执行轨迹，帮助你在课程演示时说明系统不是单次 LLM 调用。</p>
+        <p>这里展示多 Agent 工作流的执行轨迹，支持通过 SSE 实时接收节点状态。</p>
       </div>
       <div class="toolbar-actions">
+        <el-select v-model="statusFilter" clearable placeholder="状态" class="trace-filter" @change="loadTraces">
+          <el-option label="running" value="running" />
+          <el-option label="completed" value="completed" />
+          <el-option label="failed" value="failed" />
+        </el-select>
+        <el-input v-model="taskTypeFilter" class="trace-filter" placeholder="任务类型" clearable @keyup.enter="loadTraces" />
         <el-button :loading="loading" @click="loadTraces">刷新轨迹</el-button>
       </div>
     </div>
@@ -14,6 +20,13 @@
       v-if="error"
       :title="error"
       type="warning"
+      show-icon
+      :closable="false"
+    />
+    <el-alert
+      v-if="liveMessage"
+      :title="liveMessage"
+      type="info"
       show-icon
       :closable="false"
     />
@@ -31,7 +44,7 @@
           >
             <strong>{{ trace.task_type }}</strong>
             <span>{{ formatTime(trace.created_at) }}</span>
-            <small>{{ trace.status }}</small>
+            <small>{{ trace.status }} · {{ formatDuration(trace.duration_ms) }}</small>
           </button>
         </div>
         <div v-else class="empty-block compact">
@@ -51,6 +64,7 @@
               <span>状态：{{ traceDetail.status }}</span>
               <span>开始：{{ formatTime(traceDetail.created_at) }}</span>
               <span v-if="traceDetail.completed_at">结束：{{ formatTime(traceDetail.completed_at) }}</span>
+              <span>耗时：{{ formatDuration(traceDetail.duration_ms) }}</span>
             </div>
           </div>
 
@@ -86,22 +100,30 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
-import { getTrace, getTraces } from '@/api/traces'
-import type { TraceInfo, TraceListItem } from '@/types/trace'
+import { getTrace, getTraces, streamTrace } from '@/api/traces'
+import type { TraceEventInfo, TraceInfo, TraceListItem } from '@/types/trace'
 
 const loading = ref(false)
 const error = ref('')
 const traces = ref<TraceListItem[]>([])
 const traceDetail = ref<TraceInfo | null>(null)
 const selectedTraceId = ref('')
+const statusFilter = ref('')
+const taskTypeFilter = ref('')
+const liveMessage = ref('')
+let eventSource: EventSource | null = null
 
 async function loadTraces() {
   loading.value = true
   error.value = ''
   try {
-    const { data } = await getTraces({ limit: 20 })
+    const { data } = await getTraces({
+      limit: 20,
+      status: statusFilter.value || null,
+      task_type: taskTypeFilter.value || null,
+    })
     traces.value = data.items
     if (!selectedTraceId.value && traces.value.length) {
       await selectTrace(traces.value[0].id)
@@ -113,14 +135,68 @@ async function loadTraces() {
   }
 }
 
+function formatDuration(value?: number | null) {
+  if (value == null) return '进行中'
+  if (value < 1000) return `${value} ms`
+  return `${(value / 1000).toFixed(1)} s`
+}
+
 async function selectTrace(traceId: string) {
   selectedTraceId.value = traceId
   error.value = ''
+  liveMessage.value = ''
+  closeStream()
   try {
     const { data } = await getTrace(traceId)
     traceDetail.value = data
+    openStream(traceId)
   } catch (caught: any) {
     error.value = caught?.response?.data?.detail ?? '读取轨迹详情失败。'
+  }
+}
+
+function openStream(traceId: string) {
+  eventSource = streamTrace(traceId)
+  liveMessage.value = '已连接 Trace 实时流。'
+  eventSource.addEventListener('trace_event', (event) => {
+    const item = JSON.parse((event as MessageEvent).data) as TraceEventInfo
+    if (!traceDetail.value) return
+    const index = traceDetail.value.events.findIndex((existing) => existing.id === item.id)
+    if (index >= 0) {
+      traceDetail.value.events[index] = item
+    } else {
+      traceDetail.value.events.push(item)
+      traceDetail.value.events.sort((left, right) => left.step - right.step || left.created_at.localeCompare(right.created_at))
+    }
+  })
+  eventSource.addEventListener('trace_status', (event) => {
+    const item = JSON.parse((event as MessageEvent).data) as {
+      status: string
+      output_summary: string
+      completed_at?: string | null
+      duration_ms?: number | null
+    }
+    if (!traceDetail.value) return
+    traceDetail.value.status = item.status
+    traceDetail.value.output_summary = item.output_summary
+    traceDetail.value.completed_at = item.completed_at
+    traceDetail.value.duration_ms = item.duration_ms
+    liveMessage.value = item.status === 'running' ? 'Trace 实时流正在接收执行步骤。' : 'Trace 已完成，实时流已关闭。'
+    if (item.status !== 'running') {
+      closeStream()
+      loadTraces()
+    }
+  })
+  eventSource.addEventListener('error', () => {
+    liveMessage.value = ''
+    closeStream()
+  })
+}
+
+function closeStream() {
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
   }
 }
 
@@ -142,4 +218,5 @@ function eventTagType(status: string) {
 }
 
 onMounted(loadTraces)
+onBeforeUnmount(closeStream)
 </script>

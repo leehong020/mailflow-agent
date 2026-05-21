@@ -1,34 +1,53 @@
 import { http } from './http'
 import type {
   ConfirmActionResponse,
-  CreatePendingActionForDraftResponse,
   CreateDraftPreviewRequest,
   CreateDraftPreviewResponse,
+  CreateSendActionResponse,
+  DeleteDraftPreviewResponse,
   DraftPreviewInfo,
   DraftPreviewListResponse,
+  MailEditorState,
   PendingActionListResponse,
-  UpdateDraftPreviewRequest,
-  UpdateDraftPreviewResponse,
 } from '@/types/draft'
 
 export function createDraftPreview(emailId: string, payload: CreateDraftPreviewRequest) {
-  return http.post<CreateDraftPreviewResponse>(`/emails/${emailId}/draft-reply`, payload)
+  return http.post<CreateDraftPreviewResponse>(`/drafts/emails/${emailId}/preview`, payload)
+}
+
+export function createReplyWorkspacePreview(emailId: string) {
+  return http.post<CreateDraftPreviewResponse>(`/drafts/emails/${emailId}/workspace`)
+}
+
+export function getDraftPreview(draftId: string) {
+  return http.get<DraftPreviewInfo>(`/drafts/previews/${draftId}`)
+}
+
+export function getLatestDraftPreview(emailId: string) {
+  return http.get<DraftPreviewInfo | null>(`/drafts/emails/${emailId}/preview`)
 }
 
 export function getDraftPreviews(params: { limit?: number; offset?: number } = {}) {
   return http.get<DraftPreviewListResponse>('/drafts/previews', { params: { limit: 20, ...params } })
 }
 
-export function getDraftPreview(previewId: string) {
-  return http.get<DraftPreviewInfo>(`/drafts/previews/${previewId}`)
+export function updateDraftPreview(draftId: string, payload: MailEditorState) {
+  return http.put<DraftPreviewInfo>(`/drafts/previews/${draftId}`, payload)
 }
 
-export function updateDraftPreview(previewId: string, payload: UpdateDraftPreviewRequest) {
-  return http.put<UpdateDraftPreviewResponse>(`/drafts/previews/${previewId}`, payload)
+export function reviseDraftPreview(
+  draftId: string,
+  payload: MailEditorState & { instruction: string },
+) {
+  return http.post<DraftPreviewInfo>(`/drafts/previews/${draftId}/revise`, payload)
 }
 
-export function createPendingActionForDraft(previewId: string) {
-  return http.post<CreatePendingActionForDraftResponse>(`/drafts/previews/${previewId}/pending`)
+export function createSendActionForDraft(draftId: string) {
+  return http.post<CreateSendActionResponse>(`/drafts/previews/${draftId}/send-action`)
+}
+
+export function deleteDraftPreview(draftId: string) {
+  return http.delete<DeleteDraftPreviewResponse>(`/drafts/previews/${draftId}`)
 }
 
 export function getPendingActions(params: { limit?: number; offset?: number } = {}) {

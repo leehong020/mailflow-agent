@@ -10,7 +10,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Select, delete, func, select
+from sqlalchemy import Select, delete, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.graphs.email_analysis_graph import EmailAnalysisGraph, EmailAnalysisGraphResult
@@ -59,7 +59,7 @@ class EmailAnalysisService:
         self.db.commit()
         return len(records)
 
-    def analyze_unanalyzed_emails(self, limit: int = 20) -> int:
+    def analyze_unanalyzed_emails(self, limit: int = 20) -> tuple[int, list[str]]:
         """同步 Gmail 后，分析本地数据库中尚未有分析结果的邮件。
 
         Inbox 页面按钮叫“同步并分析邮件”，因此这里先拉取 Gmail 最近邮件，
@@ -80,10 +80,12 @@ class EmailAnalysisService:
             .order_by(EmailRecord.received_at.desc().nullslast())
             .limit(limit)
         ).all()
+        trace_ids: list[str] = []
         for record in records:
-            self.analyze_email(record)
+            _, trace = self.analyze_email(record)
+            trace_ids.append(trace.id)
         self.db.commit()
-        return len(records)
+        return len(records), trace_ids
 
     def reanalyze_email(self, email: EmailRecord) -> EmailAnalysis:
         """强制重新分析单封邮件。"""
@@ -149,74 +151,58 @@ class EmailAnalysisService:
             or analysis.reason.startswith("模型输出校验或调用失败")
         )
 
-    def analyze_email(self, email: EmailRecord) -> EmailAnalysis:
-        """运行三个 Agent，并保存分析结果。"""
+    def analyze_email(self, email: EmailRecord) -> tuple[EmailAnalysis, AgentTrace]:
+        """运行 LangGraph 邮件分析图，并保存分析结果和轨迹。"""
 
-        # EmailAnalysisGraph 内部会依次调用三个大模型 Agent。
         user = self._current_user()
         trace = self.trace_service.create_trace(
             user=user,
             task_type="analyze_email",
             input_summary=f"邮件：{email.subject} | {email.sender}",
         )
-        self.trace_service.add_event(
-            trace=trace,
-            step=1,
-            agent_name="EmailSummarizerAgent",
-            status="running",
-            message="开始生成邮件摘要。",
-            input_preview=(email.subject or "")[:120],
-        )
-        summary = self.graph.summarizer.summarize(email)
-        self.trace_service.add_event(
-            trace=trace,
-            step=1,
-            agent_name="EmailSummarizerAgent",
-            status="completed",
-            message="邮件摘要生成完成。",
-            output_preview=summary.summary[:200],
-        )
 
-        self.trace_service.add_event(
-            trace=trace,
-            step=2,
-            agent_name="EmailTriageAgent",
-            status="running",
-            message="开始判断邮件分类与优先级。",
-            input_preview=(email.subject or "")[:120],
-        )
-        triage = self.graph.triage_agent.triage(email)
-        self.trace_service.add_event(
-            trace=trace,
-            step=2,
-            agent_name="EmailTriageAgent",
-            status="completed",
-            message="邮件分类完成。",
-            output_preview=f"{triage.category} / {triage.priority}",
-        )
+        def trace_event(
+            step: int,
+            agent_name: str,
+            event_status: str,
+            message: str,
+            input_preview: str,
+            output_preview: str,
+        ) -> None:
+            """LangGraph 节点回调：把节点状态写入数据库，供 SSE 推送。"""
 
-        self.trace_service.add_event(
-            trace=trace,
-            step=3,
-            agent_name="TaskExtractionAgent",
-            status="running",
-            message="开始提取待办事项。",
-            input_preview=(email.subject or "")[:120],
-        )
-        tasks = self.graph.task_agent.extract(email=email, has_task=triage.has_task, priority=triage.priority)
-        self.trace_service.add_event(
-            trace=trace,
-            step=3,
-            agent_name="TaskExtractionAgent",
-            status="completed",
-            message="待办事项提取完成。",
-            output_preview=f"提取到 {len(tasks)} 个任务。",
-        )
+            self.trace_service.add_event(
+                trace=trace,
+                step=step,
+                agent_name=agent_name,
+                status=event_status,
+                message=message,
+                input_preview=input_preview,
+                output_preview=output_preview,
+            )
+            # 分析请求仍是同步执行。这里主动 flush，让并发的 SSE 连接能尽快
+            # 读到新事件，而不是等整个请求 commit 后才看到所有事件。
+            self.db.flush()
 
-        result = EmailAnalysisGraphResult(summary=summary, triage=triage, tasks=tasks)
-        analysis = self._save_analysis(email=email, result=result)
-        self.trace_service.complete_trace(trace, output_summary=f"完成分析：{triage.category} / {triage.priority}")
-        return analysis
+        try:
+            result = self.graph.run(email, on_event=trace_event)
+            analysis = self._save_analysis(email=email, result=result)
+            self.trace_service.complete_trace(
+                trace,
+                output_summary=f"完成分析：{result.triage.category} / {result.triage.priority}",
+            )
+            return analysis, trace
+        except Exception as exc:
+            self.trace_service.add_event(
+                trace=trace,
+                step=99,
+                agent_name="EmailAnalysisGraph",
+                status="failed",
+                message="邮件分析工作流执行失败。",
+                output_preview=str(exc)[:200],
+            )
+            self.trace_service.fail_trace(trace, output_summary=str(exc)[:500])
+            raise
 
     def list_emails(
         self,
@@ -226,6 +212,12 @@ class EmailAnalysisService:
         need_reply: bool | None = None,
         has_meeting_request: bool | None = None,
         has_task: bool | None = None,
+        search: str | None = None,
+        analyzed: bool | None = None,
+        label: str | None = None,
+        is_read: bool | None = None,
+        is_starred: bool | None = None,
+        mailbox_status: str | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> tuple[list[EmailRecord], int]:
@@ -248,6 +240,29 @@ class EmailAnalysisService:
             query = query.where(EmailAnalysis.has_meeting_request == has_meeting_request)
         if has_task is not None:
             query = query.where(EmailAnalysis.has_task == has_task)
+        if search:
+            pattern = f"%{search.strip()}%"
+            query = query.where(
+                or_(
+                    EmailRecord.subject.ilike(pattern),
+                    EmailRecord.sender.ilike(pattern),
+                    EmailRecord.snippet.ilike(pattern),
+                    EmailRecord.body_text.ilike(pattern),
+                )
+            )
+        if analyzed is True:
+            query = query.where(EmailRecord.analysis.has())
+        if analyzed is False:
+            query = query.where(~EmailRecord.analysis.has())
+        if label:
+            # SQLite JSON 查询能力有限；这里用 contains 满足本地演示和 PostgreSQL JSONB 迁移前的查询需求。
+            query = query.where(EmailRecord.label_ids.contains(label))
+        if is_read is not None:
+            query = query.where(EmailRecord.is_read.is_(is_read))
+        if is_starred is not None:
+            query = query.where(EmailRecord.is_starred.is_(is_starred))
+        if mailbox_status:
+            query = query.where(EmailRecord.mailbox_status == mailbox_status)
 
         # total 用于前端后续分页；当前页面先展示最近 20 封。
         total = self.db.scalar(select(func.count()).select_from(query.subquery())) or 0
@@ -255,6 +270,28 @@ class EmailAnalysisService:
             query.order_by(EmailRecord.received_at.desc().nullslast()).offset(offset).limit(limit)
         ).unique().all()
         return list(records), total
+
+    def analysis_totals(self) -> tuple[int, int]:
+        """返回当前用户已分析和未分析邮件数量，用于 Inbox 状态条。"""
+
+        user = self._current_user()
+        analyzed_total = (
+            self.db.scalar(
+                select(func.count())
+                .select_from(EmailRecord)
+                .where(EmailRecord.user_id == user.id, EmailRecord.analysis.has())
+            )
+            or 0
+        )
+        unanalyzed_total = (
+            self.db.scalar(
+                select(func.count())
+                .select_from(EmailRecord)
+                .where(EmailRecord.user_id == user.id, ~EmailRecord.analysis.has())
+            )
+            or 0
+        )
+        return analyzed_total, unanalyzed_total
 
     def get_email_detail(self, email_id: str) -> EmailRecord | None:
         """查询邮件详情，包含分析结果和任务。"""
@@ -322,6 +359,10 @@ class EmailAnalysisService:
         record.subject = raw.get("subject") or "(无主题)"
         record.sender = raw.get("sender") or ""
         record.recipients = raw.get("recipients") or []
+        record.label_ids = raw.get("label_ids") or []
+        record.is_read = bool(raw.get("is_read", True))
+        record.is_starred = bool(raw.get("is_starred", False))
+        record.mailbox_status = raw.get("mailbox_status") or "inbox"
         record.received_at = self._parse_datetime(raw.get("received_at"))
         record.body_text = raw.get("body_text") or raw.get("body_preview") or ""
         record.snippet = raw.get("snippet") or ""
